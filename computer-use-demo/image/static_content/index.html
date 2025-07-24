@@ -28,17 +28,14 @@
     </head>
     <body>
         <div class="container">
-            <iframe
-                src="http://localhost:8501"
-                class="left"
-                allow="fullscreen"
-            ></iframe>
-            <iframe
-                id="vnc"
-                src="http://127.0.0.1:6080/vnc.html?&resize=scale&autoconnect=1&view_only=1&reconnect=1&reconnect_delay=2000"
-                class="right"
-                allow="fullscreen"
-            ></iframe>
+            <script>
+                var baseAddress = window.location.protocol + '//' + window.location.hostname + ':8501';
+                document.write('<iframe src="' + baseAddress + '" class="left" allow="fullscreen"></iframe>');
+            </script>
+            <script>
+                var baseAddress = window.location.protocol + '//' + window.location.hostname + ':6080';
+                document.write('<iframe id="vnc" src="' + baseAddress + '/vnc.html?&resize=scale&autoconnect=1&view_only=1&reconnect=1&reconnect_delay=2000" class="right" allow="fullscreen"></iframe>');
+            </script>
             <button
                 id="toggleViewOnly"
                 style="position: absolute; top: 10px; right: 10px; z-index: 1000"
