@@ -181,10 +181,11 @@ async def sampling_loop(
             output_callback(content_block)
             if content_block["type"] == "tool_use":
                 tool_name = content_block["name"]
-                logger.warning(f"{datetime.now()} Running {tool_name} tool ...")
+                tool_input = cast(dict[str, Any], content_block["input"])
+                logger.warning(f"{datetime.now()} Running {tool_name} tool. Input: {tool_input} ...")
                 result = await tool_collection.run(
                     name=tool_name,
-                    tool_input=cast(dict[str, Any], content_block["input"]),
+                    tool_input=tool_input,
                 )
                 logger.warning(f"{datetime.now()} {tool_name} tool done.")
                 tool_result_content.append(
