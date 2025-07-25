@@ -178,10 +178,12 @@ async def sampling_loop(
         for content_block in response_params:
             output_callback(content_block)
             if content_block["type"] == "tool_use":
+                logger.warning(f"{datetime.now()} Running {content_block["name"]} tool ...")
                 result = await tool_collection.run(
                     name=content_block["name"],
                     tool_input=cast(dict[str, Any], content_block["input"]),
                 )
+                logger.warning(f"{datetime.now()} {content_block["name"]} tool done.")
                 tool_result_content.append(
                     _make_api_tool_result(result, content_block["id"])
                 )
