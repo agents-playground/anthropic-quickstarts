@@ -437,7 +437,7 @@ def _api_response_callback(
     if error:
         _render_error(error)
     logger.warning(f"{datetime.now()} api_response_callback 4")
-    _render_api_response(request, response, response_id, tab)
+    # _render_api_response(request, response, response_id, tab)
     logger.warning(f"{datetime.now()} api_response_callback 5")
 
 
