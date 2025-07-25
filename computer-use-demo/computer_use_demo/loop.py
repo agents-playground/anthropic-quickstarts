@@ -162,19 +162,26 @@ async def sampling_loop(
             logger.warning(f"{datetime.now()} Exception raised.", e)
             return messages
 
+        logger.warning(f"{datetime.now()} Started api_response_callback 1 ...")
         api_response_callback(
             raw_response.http_response.request, raw_response.http_response, None
         )
+        logger.warning(f"{datetime.now()} Done api_response_callback 1.")
 
+        logger.warning(f"{datetime.now()} Started parsing ...")
         response = raw_response.parse()
+        logger.warning(f"{datetime.now()} Done parsing.")
 
+        logger.warning(f"{datetime.now()} Response to params started ...")
         response_params = _response_to_params(response)
+        logger.warning(f"{datetime.now()} Response to params done.")
         messages.append(
             {
                 "role": "assistant",
                 "content": response_params,
             }
         )
+        logger.warning(f"{datetime.now()} messages.append() done.")
 
         tool_result_content: list[BetaToolResultBlockParam] = []
         for content_block in response_params:
