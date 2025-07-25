@@ -106,7 +106,7 @@ async def sampling_loop(
             betas.append("token-efficient-tools-2025-02-19")
         image_truncation_threshold = only_n_most_recent_images or 0
         if provider == APIProvider.ANTHROPIC:
-            client = Anthropic(api_key=api_key, max_retries=4)
+            client = Anthropic(api_key=api_key, max_retries=50)
             enable_prompt_caching = True
         elif provider == APIProvider.VERTEX:
             client = AnthropicVertex()
