@@ -39,7 +39,7 @@ from .tools import (
 PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31"
 
 logger = logging.Logger("loop.py")
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 class APIProvider(StrEnum):
