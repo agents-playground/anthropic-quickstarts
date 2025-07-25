@@ -1,7 +1,7 @@
 """
 Agentic sampling loop that calls the Anthropic API and local implementation of anthropic-defined computer use tools.
 """
-
+import logging
 import platform
 from collections.abc import Callable
 from datetime import datetime
@@ -37,6 +37,9 @@ from .tools import (
 )
 
 PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31"
+
+logger = logging.Logger("loop.py")
+logging.basicConfig(level=logging.INFO)
 
 
 class APIProvider(StrEnum):
@@ -96,6 +99,7 @@ async def sampling_loop(
     )
 
     while True:
+        logger.warning("loop.py iteration ...")
         enable_prompt_caching = False
         betas = [tool_group.beta_flag] if tool_group.beta_flag else []
         if token_efficient_tools_beta:
@@ -147,9 +151,11 @@ async def sampling_loop(
             )
         except (APIStatusError, APIResponseValidationError) as e:
             api_response_callback(e.request, e.response, e)
+            output_callback("Exception raised. Execution won't continue without new user input.")
             return messages
         except APIError as e:
             api_response_callback(e.request, e.body, e)
+            output_callback("Exception raised. Execution won't continue without new user input.")
             return messages
 
         api_response_callback(
@@ -180,6 +186,7 @@ async def sampling_loop(
                 tool_output_callback(result, content_block["id"])
 
         if not tool_result_content:
+            output_callback("No tool use requested. Prev response is final. Execution terminated.")
             return messages
 
         messages.append({"content": tool_result_content, "role": "user"})
