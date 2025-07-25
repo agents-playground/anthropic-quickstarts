@@ -477,6 +477,7 @@ def _render_api_response(
             else:
                 st.write(response)
             logger.warning(f"{datetime.now()} with expander 5")
+    logger.warning(f"{datetime.now()} with expander 6")
 
 
 def _render_error(error: Exception):
