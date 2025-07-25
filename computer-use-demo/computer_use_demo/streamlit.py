@@ -4,6 +4,7 @@ Entrypoint for streamlit, see https://docs.streamlit.io/
 
 import asyncio
 import base64
+import logging
 import os
 import subprocess
 import traceback
@@ -36,6 +37,9 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
     APIProvider.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
     APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
 }
+
+logger = logging.Logger("streamlit.py")
+logging.basicConfig(level=logging.DEBUG)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -427,10 +431,14 @@ def _api_response_callback(
     Handle an API response by storing it to state and rendering it.
     """
     response_id = datetime.now().isoformat()
+    logger.warning(f"{datetime.now()} api_response_callback 2")
     response_state[response_id] = (request, response)
+    logger.warning(f"{datetime.now()} api_response_callback 3")
     if error:
         _render_error(error)
+    logger.warning(f"{datetime.now()} api_response_callback 4")
     _render_api_response(request, response, response_id, tab)
+    logger.warning(f"{datetime.now()} api_response_callback 5")
 
 
 def _tool_output_callback(
@@ -449,20 +457,26 @@ def _render_api_response(
 ):
     """Render an API response to a streamlit tab"""
     with tab:
+        logger.warning(f"{datetime.now()} with tab 1")
         with st.expander(f"Request/Response ({response_id})"):
+            logger.warning(f"{datetime.now()} with expander 1")
             newline = "\n\n"
             st.markdown(
                 f"`{request.method} {request.url}`{newline}{newline.join(f'`{k}: {v}`' for k, v in request.headers.items())}"
             )
+            logger.warning(f"{datetime.now()} with expander 2")
             st.json(request.read().decode())
+            logger.warning(f"{datetime.now()} with expander 3")
             st.markdown("---")
             if isinstance(response, httpx.Response):
                 st.markdown(
                     f"`{response.status_code}`{newline}{newline.join(f'`{k}: {v}`' for k, v in response.headers.items())}"
                 )
+                logger.warning(f"{datetime.now()} with expander 4")
                 st.json(response.text)
             else:
                 st.write(response)
+            logger.warning(f"{datetime.now()} with expander 5")
 
 
 def _render_error(error: Exception):
