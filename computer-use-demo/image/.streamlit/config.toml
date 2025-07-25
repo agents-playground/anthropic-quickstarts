@@ -1,7 +1,7 @@
 [server]
 watchFileSystem = false
 fileWatcherType = "none"
-#runOnSave = true
+runOnSave = false
 
 [browser]
 gatherUsageStats = false
