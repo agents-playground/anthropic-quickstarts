@@ -1,0 +1,15 @@
+services:
+  computer-use-demo:
+    image: ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
+    environment:
+      - G_SLICE=always-malloc
+    env_file: .env
+    ports:
+      - 5900:5900
+      - 8501:8501
+      - 6080:6080
+      - 8080:8080
+    volumes:
+      - ./image/static_content:/home/computeruse/static_content/
+      - ./computer_use_demo:/home/computeruse/computer_use_demo/
+      - $HOME/.anthropic:/home/computeruse/.anthropic
