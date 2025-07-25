@@ -99,7 +99,7 @@ async def sampling_loop(
     )
 
     while True:
-        logger.warning("loop.py iteration ...")
+        logger.warning(f"{datetime.now()} loop.py iteration ...")
         enable_prompt_caching = False
         betas = [tool_group.beta_flag] if tool_group.beta_flag else []
         if token_efficient_tools_beta:
@@ -152,10 +152,12 @@ async def sampling_loop(
         except (APIStatusError, APIResponseValidationError) as e:
             api_response_callback(e.request, e.response, e)
             output_callback("Exception raised. Execution won't continue without new user input.")
+            logger.warning(f"{datetime.now()} Exception raised.", e)
             return messages
         except APIError as e:
             api_response_callback(e.request, e.body, e)
             output_callback("Exception raised. Execution won't continue without new user input.")
+            logger.warning(f"{datetime.now()} Exception raised.", e)
             return messages
 
         api_response_callback(
@@ -187,6 +189,7 @@ async def sampling_loop(
 
         if not tool_result_content:
             output_callback("No tool use requested. Prev response is final. Execution terminated.")
+            logger.warning(f"{datetime.now()} No tool use requested.")
             return messages
 
         messages.append({"content": tool_result_content, "role": "user"})
