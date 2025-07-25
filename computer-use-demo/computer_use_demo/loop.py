@@ -190,7 +190,9 @@ async def sampling_loop(
                 tool_result_content.append(
                     _make_api_tool_result(result, content_block["id"])
                 )
+                logger.warning(f"{datetime.now()} {tool_name} tool content appended.")
                 tool_output_callback(result, content_block["id"])
+                logger.warning(f"{datetime.now()} {tool_name} tool callback done.")
 
         if not tool_result_content:
             output_callback("No tool use requested. Prev response is final. Execution terminated.")
