@@ -1,6 +1,6 @@
 [server]
 watchFileSystem = false
-#fileWatcherType = "auto"
+fileWatcherType = "none"
 #runOnSave = true
 
 [browser]
