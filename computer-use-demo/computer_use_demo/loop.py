@@ -140,6 +140,7 @@ async def sampling_loop(
         # implementation may be able call the SDK directly with:
         # `response = client.messages.create(...)` instead.
         try:
+            logger.warning(f"{datetime.now()} Sending request to {model} ...")
             raw_response = client.beta.messages.with_raw_response.create(
                 max_tokens=max_tokens,
                 messages=messages,
@@ -149,6 +150,7 @@ async def sampling_loop(
                 betas=betas,
                 extra_body=extra_body,
             )
+            logger.warning(f"{datetime.now()} Received {model} response.")
         except (APIStatusError, APIResponseValidationError) as e:
             api_response_callback(e.request, e.response, e)
             output_callback("Exception raised. Execution won't continue without new user input.")
