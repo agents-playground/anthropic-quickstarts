@@ -35,7 +35,6 @@ from .tools import (
     ToolResult,
     ToolVersion,
 )
-from .utils import persist_message
 
 PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31"
 
@@ -177,7 +176,7 @@ async def sampling_loop(
         logger.warning(f"{datetime.now()} Response to params started ...")
         response_params = _response_to_params(response)
         logger.warning(f"{datetime.now()} Response to params done.")
-        persist_message(messages, {"role": "assistant", "content": response_params})
+        messages.append({"role": "assistant", "content": response_params})
         logger.warning(f"{datetime.now()} messages.append() done.")
 
         tool_result_content: list[BetaToolResultBlockParam] = []
@@ -204,7 +203,7 @@ async def sampling_loop(
             logger.warning(f"{datetime.now()} No tool use requested.")
             return messages
 
-        persist_message(messages, {"content": tool_result_content, "role": "user"})
+        messages.append({"content": tool_result_content, "role": "user"})
         persist_state()
 
 

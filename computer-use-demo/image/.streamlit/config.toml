@@ -1,4 +1,6 @@
 [server]
+watchFileSystem = false
+fileWatcherType = "none"
 runOnSave = false
 
 [browser]

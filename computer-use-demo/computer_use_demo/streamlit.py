@@ -33,7 +33,6 @@ from computer_use_demo.loop import (
     sampling_loop,
 )
 from computer_use_demo.tools import ToolResult, ToolVersion
-from computer_use_demo.utils import persist_message
 
 PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
     APIProvider.ANTHROPIC: "claude-sonnet-4-20250514",
@@ -121,8 +120,15 @@ def setup_state():
             cursor.executescript(ddl)
             connection.commit()
         # read msgs
-        cursor.execute("SELECT message FROM messages ORDER BY id")
-        st.session_state.messages = [pickle.loads(msg[0]) for msg in cursor.fetchall()]
+        cursor.execute("SELECT state FROM session_state WHERE id = 1")
+        row = cursor.fetchone()
+        if row:
+            session_state = pickle.loads(row[0])
+            logger.warning(f"Restored state: {session_state}")
+            for k, v in session_state.items():
+                st.session_state.__setattr__(k, v)
+
+    logger.warning(f"SESSION STATE: {pickle.dumps(st.session_state.to_dict())}")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -264,6 +270,7 @@ async def main():
         if st.button("Reset", type="primary"):
             with st.spinner("Resetting..."):
                 st.session_state.clear()
+                persist_state()
                 setup_state()
 
                 subprocess.run("pkill Xvfb; pkill tint2", shell=True)  # noqa: ASYNC221
@@ -309,7 +316,7 @@ async def main():
 
         # render past chats
         if new_message:
-            persist_message(st.session_state.messages,
+            st.session_state.messages.append(
                 {
                     "role": Sender.USER,
                     "content": [
@@ -330,6 +337,7 @@ async def main():
             return
 
         with track_sampling_loop():
+            persist_state()
             # run the agent sampling loop with the newest message
             st.session_state.messages = await sampling_loop(
                 system_prompt_suffix=st.session_state.custom_system_prompt,
@@ -355,15 +363,14 @@ async def main():
                 token_efficient_tools_beta=st.session_state.token_efficient_tools_beta,
                 persist_state=persist_state
             )
+            persist_state()
 
 
 def persist_state():
-    state = {"messages": st.session_state.messages, "tools": st.session_state.tools}
-    pickled_state = pickle.dumps(state)
-    logger.warning(f"State dumps: {pickled_state}")
+    pickled_state = pickle.dumps(st.session_state.to_dict())
     with sqlite3.connect("computer_use_demo/state.db") as connection:
         cursor = connection.cursor()
-        cursor.execute("INSERT INTO session_state (state) VALUES (?)", (pickled_state,))
+        cursor.execute("INSERT INTO session_state (id, state) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET state = ?, timestamp = CURRENT_TIMESTAMP", (pickled_state, pickled_state))
         connection.commit()
 
 
