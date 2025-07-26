@@ -6,6 +6,8 @@ import asyncio
 import base64
 import logging
 import os
+import pickle
+import sqlite3
 import subprocess
 import traceback
 from contextlib import contextmanager
@@ -31,6 +33,7 @@ from computer_use_demo.loop import (
     sampling_loop,
 )
 from computer_use_demo.tools import ToolResult, ToolVersion
+from computer_use_demo.utils import persist_message
 
 PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
     APIProvider.ANTHROPIC: "claude-sonnet-4-20250514",
@@ -39,7 +42,7 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
 }
 
 logger = logging.Logger("streamlit.py")
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -109,6 +112,18 @@ class Sender(StrEnum):
 
 
 def setup_state():
+
+    with sqlite3.connect("computer_use_demo/state.db") as connection:
+        cursor = connection.cursor()
+        # create tables
+        with open("computer_use_demo/tables.sql", "r") as f:
+            ddl = f.read()
+            cursor.executescript(ddl)
+            connection.commit()
+        # read msgs
+        cursor.execute("SELECT message FROM messages ORDER BY id")
+        st.session_state.messages = [pickle.loads(msg[0]) for msg in cursor.fetchall()]
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "api_key" not in st.session_state:
@@ -294,7 +309,7 @@ async def main():
 
         # render past chats
         if new_message:
-            st.session_state.messages.append(
+            persist_message(st.session_state.messages,
                 {
                     "role": Sender.USER,
                     "content": [
@@ -338,7 +353,18 @@ async def main():
                 if st.session_state.thinking
                 else None,
                 token_efficient_tools_beta=st.session_state.token_efficient_tools_beta,
+                persist_state=persist_state
             )
+
+
+def persist_state():
+    state = {"messages": st.session_state.messages, "tools": st.session_state.tools}
+    pickled_state = pickle.dumps(state)
+    logger.warning(f"State dumps: {pickled_state}")
+    with sqlite3.connect("computer_use_demo/state.db") as connection:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO session_state (state) VALUES (?)", (pickled_state,))
+        connection.commit()
 
 
 def maybe_add_interruption_blocks():

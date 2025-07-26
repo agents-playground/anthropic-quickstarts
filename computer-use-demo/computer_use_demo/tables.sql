@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+--    sender TEXT NOT NULL CHECK(sender IN ('USER', 'ASSISTANT', 'TOOL')),
+    message BLOB NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS session_state (
+    state BLOB NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);

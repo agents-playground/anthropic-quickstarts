@@ -35,11 +35,12 @@ from .tools import (
     ToolResult,
     ToolVersion,
 )
+from .utils import persist_message
 
 PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31"
 
 logger = logging.Logger("loop.py")
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 class APIProvider(StrEnum):
@@ -87,6 +88,7 @@ async def sampling_loop(
     tool_version: ToolVersion,
     thinking_budget: int | None = None,
     token_efficient_tools_beta: bool = False,
+    persist_state: Callable = None
 ):
     """
     Agentic sampling loop for the assistant/tool interaction of computer use.
@@ -175,12 +177,7 @@ async def sampling_loop(
         logger.warning(f"{datetime.now()} Response to params started ...")
         response_params = _response_to_params(response)
         logger.warning(f"{datetime.now()} Response to params done.")
-        messages.append(
-            {
-                "role": "assistant",
-                "content": response_params,
-            }
-        )
+        persist_message(messages, {"role": "assistant", "content": response_params})
         logger.warning(f"{datetime.now()} messages.append() done.")
 
         tool_result_content: list[BetaToolResultBlockParam] = []
@@ -207,7 +204,8 @@ async def sampling_loop(
             logger.warning(f"{datetime.now()} No tool use requested.")
             return messages
 
-        messages.append({"content": tool_result_content, "role": "user"})
+        persist_message(messages, {"content": tool_result_content, "role": "user"})
+        persist_state()
 
 
 def _maybe_filter_to_n_most_recent_images(
