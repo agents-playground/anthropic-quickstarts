@@ -123,45 +123,41 @@ async def main():
                 reset_db()
                 setup_state()
 
-    chat_tab, requests_tab = st.tabs(["Chat", "HTTP Exchange Logs"])
-    new_message = st.chat_input("Type a message to Claude...")
+    chat_tab, requests_tab, user_msg_tab = st.tabs(["Chat", "HTTP Logs", "User messages"])
+    chat_input = st.chat_input("Type a message to Claude...")
 
     with chat_tab:
         # render past chats
         for message in st.session_state.messages[-10:]:
-            if isinstance(message["content"], str):
-                _render_message(message["role"], message["content"])
-            elif isinstance(message["content"], list):
-                for block in message["content"]:
-                    # the tool result we send back to the Anthropic API isn't sufficient to render all details,
-                    # so we store the tool use responses
-                    if isinstance(block, dict) and block["type"] == "tool_result":
-                        _render_message(
-                            Sender.TOOL, st.session_state.tools[block["tool_use_id"]]
-                        )
-                    else:
-                        _render_message(
-                            message["role"],
-                            cast(BetaContentBlockParam | ToolResult, block),
-                        )
+            blocks = list(message["content"]) if isinstance(message["content"], str) else message["content"]
+            for block in blocks:
+                # the tool result we send back to the Anthropic API isn't sufficient to render all details,
+                # so we store the tool use responses
+                if isinstance(block, dict) and block["type"] == "tool_result":
+                    _render_chat_message(Sender.TOOL, st.session_state.tools[block["tool_use_id"]])
+                else:
+                    _render_chat_message(message["role"], cast(BetaContentBlockParam | ToolResult, block))
+
+        # render past user msgs
+        for message in st.session_state.messages:
+            blocks = list(message["content"]) if isinstance(message["content"], str) else message["content"]
+            for block in blocks:
+                if message["role"] == Sender.USER:
+                    _render_user_message(block, user_msg_tab)
 
         # render past http exchanges
         for identity, (request, response) in list(st.session_state.responses.items())[-3:]:
             _render_api_response(request, response, identity, requests_tab)
 
         # render past chats
-        if new_message:
-            st.session_state.messages.append(
-                {
-                    "role": Sender.USER,
-                    "content": [
-                        *maybe_add_interruption_blocks(),
-                        BetaTextBlockParam(type="text", text=new_message),
-                    ],
-                }
-            )
-            _render_message(Sender.USER, new_message)
-            slice_chat_history()
+        if chat_input:
+            content = [
+                *maybe_add_interruption_blocks(),
+                BetaTextBlockParam(type="text", text=chat_input),
+            ]
+            st.session_state.messages.append({"role": Sender.USER, "content": content})
+            _render_chat_message(Sender.USER, chat_input)
+            _render_user_message(chat_input, user_msg_tab)
 
         if not st.session_state.messages or st.session_state.messages[-1]["role"] != Sender.USER:
             # we don't have a user message to respond to, exit early
@@ -174,7 +170,7 @@ async def main():
                 system_prompt_suffix=st.session_state.custom_system_prompt,
                 model=st.session_state.model,
                 messages=st.session_state.messages,
-                output_callback=partial(_render_message, Sender.BOT),
+                output_callback=partial(_render_chat_message, Sender.BOT),
                 tool_output_callback=partial(
                     _tool_output_callback, tool_state=st.session_state.tools
                 ),
@@ -241,7 +237,6 @@ def _api_response_callback(
     """
     Handle an API response by storing it to state and rendering it.
     """
-    slice_chat_history()
     response_id = datetime.now().isoformat()
     response_state[response_id] = (request, response)
     if error:
@@ -254,17 +249,17 @@ def _tool_output_callback(
 ):
     """Handle a tool output by storing it to state and rendering it."""
     tool_state[tool_id] = tool_output
-    _render_message(Sender.TOOL, tool_output)
+    _render_chat_message(Sender.TOOL, tool_output)
 
 
 def _render_api_response(
     request: httpx.Request,
     response: httpx.Response | object | None,
     response_id: str,
-    tab: DeltaGenerator,
+    requests_tab: DeltaGenerator,
 ):
     """Render an API response to a streamlit tab"""
-    with tab:
+    with requests_tab:
         with st.expander(f"Request/Response ({response_id})"):
             newline = "\n\n"
             st.markdown(
@@ -295,7 +290,7 @@ def _render_error(error: Exception):
     st.error(f"**{error.__class__.__name__}**\n\n{body}", icon=":material/error:")
 
 
-def _render_message(
+def _render_chat_message(
     sender: str,
     message: str | BetaContentBlockParam | ToolResult,
 ):
@@ -326,10 +321,13 @@ def _render_message(
             st.markdown(message)
 
 
-def slice_chat_history():
-    pass
-    # if len(st.session_state.messages) > MAX_HISTORY_SIZE:
-    #     st.session_state.messages = st.session_state.messages[-MAX_HISTORY_SIZE:]
+def _render_user_message(message: str, user_msg_tab: DeltaGenerator):
+    with user_msg_tab:
+        if isinstance(message, dict):
+            if message["type"] == "text":
+                st.write(message["text"])
+        else:
+            st.markdown(message)
 
 
 if __name__ == "__main__":
