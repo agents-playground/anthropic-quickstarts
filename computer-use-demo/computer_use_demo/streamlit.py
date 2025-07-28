@@ -89,8 +89,6 @@ def setup_state():
     st.session_state.custom_system_prompt = ""
     st.session_state.token_efficient_tools_beta = False
 
-    # reset_db()
-
     with sqlite3.connect(DB_FILE) as connection:
         cursor = connection.cursor()
         # create tables if not exist
@@ -136,11 +134,8 @@ async def main():
             with st.spinner("Resetting..."):
                 st.session_state.clear()
                 persist_state()
+                reset_db()
                 setup_state()
-
-                subprocess.run("pkill Xvfb; pkill tint2", shell=True)  # noqa: ASYNC221
-                await asyncio.sleep(1)
-                subprocess.run("./start_all.sh", shell=True)  # noqa: ASYNC221
 
     chat, http_logs = st.tabs(["Chat", "HTTP Exchange Logs"])
     new_message = st.chat_input(
