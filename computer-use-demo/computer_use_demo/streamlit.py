@@ -262,18 +262,18 @@ def _render_api_response(
     with requests_tab:
         with st.expander(f"Request/Response ({response_id})"):
             newline = "\n\n"
-            st.markdown(
-                f"`{request.method} {request.url}`{newline}{newline.join(f'`{k}: {v}`' for k, v in request.headers.items())}"
-            )
-            st.json(request.read().decode())
-            st.markdown("---")
-            if isinstance(response, httpx.Response):
-                st.markdown(
-                    f"`{response.status_code}`{newline}{newline.join(f'`{k}: {v}`' for k, v in response.headers.items())}"
-                )
-                st.json(response.text)
-            else:
-                st.write(response)
+            # st.markdown(
+            #     f"`{request.method} {request.url}`{newline}{newline.join(f'`{k}: {v}`' for k, v in request.headers.items())}"
+            # )
+            # st.json(request.read().decode())
+            # st.markdown("---")
+            # if isinstance(response, httpx.Response):
+            #     st.markdown(
+            #         f"`{response.status_code}`{newline}{newline.join(f'`{k}: {v}`' for k, v in response.headers.items())}"
+            #     )
+            #     st.json(response.text)
+            # else:
+            #     st.write(response)
 
 
 def _render_error(error: Exception):
