@@ -1,5 +1,6 @@
 import os
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler, SimpleHTTPRequestHandler
+import threading
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 
 # class HTTPServerV6(HTTPServer):
@@ -15,4 +16,6 @@ def run_server():
 
 
 if __name__ == "__main__":
-    run_server()
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True  # Allows the main program to exit even if the thread is running
+    server_thread.start()
