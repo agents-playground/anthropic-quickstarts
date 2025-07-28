@@ -83,7 +83,6 @@ async def sampling_loop(
     api_key: str,
     max_tokens: int = 4096,
     tool_version: ToolVersion,
-    thinking_budget: int | None = None,
     token_efficient_tools_beta: bool = False,
     persist_state: Callable = None
 ):
@@ -107,13 +106,6 @@ async def sampling_loop(
         betas.append(PROMPT_CACHING_BETA_FLAG)
         system["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
-        extra_body = {}
-        if thinking_budget:
-            # Ensure we only send the required fields for thinking
-            extra_body = {
-                "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
-            }
-
         # Call the API
         # we use raw_response to provide debug information to streamlit. Your
         # implementation may be able call the SDK directly with:
@@ -129,7 +121,6 @@ async def sampling_loop(
                 system=[system],
                 tools=tool_collection.to_params(),
                 betas=betas,
-                extra_body=extra_body,
             )
 
             del messages[-1]["content"][-1]["cache_control"]
@@ -185,15 +176,6 @@ def _response_to_params(
         if isinstance(block, BetaTextBlock):
             if block.text:
                 res.append(BetaTextBlockParam(type="text", text=block.text))
-            elif getattr(block, "type", None) == "thinking":
-                # Handle thinking blocks - include signature field
-                thinking_block = {
-                    "type": "thinking",
-                    "thinking": getattr(block, "thinking", None),
-                }
-                if hasattr(block, "signature"):
-                    thinking_block["signature"] = getattr(block, "signature", None)
-                res.append(cast(BetaContentBlockParam, thinking_block))
         else:
             # Handle tool use blocks normally
             res.append(cast(BetaToolUseBlockParam, block.model_dump()))

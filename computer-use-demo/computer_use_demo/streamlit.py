@@ -35,12 +35,6 @@ from computer_use_demo.loop import (
 )
 from computer_use_demo.tools import ToolResult, ToolVersion
 
-PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
-    APIProvider.ANTHROPIC: "claude-sonnet-4-20250514",
-    APIProvider.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
-}
-
 logger = logging.Logger("streamlit.py")
 logging.basicConfig(level=logging.INFO)
 
@@ -52,20 +46,6 @@ class ModelConfig:
     default_output_tokens: int
     has_thinking: bool = False
 
-
-SONNET_3_5_NEW = ModelConfig(
-    tool_version="computer_use_20241022",
-    max_output_tokens=1024 * 8,
-    default_output_tokens=1024 * 4,
-)
-
-SONNET_3_7 = ModelConfig(
-    tool_version="computer_use_20250124",
-    max_output_tokens=128_000,
-    default_output_tokens=1024 * 16,
-    has_thinking=True,
-)
-
 CLAUDE_4 = ModelConfig(
     tool_version="computer_use_20250124",
     max_output_tokens=128_000,
@@ -74,38 +54,19 @@ CLAUDE_4 = ModelConfig(
 )
 
 MODEL_TO_MODEL_CONF: dict[str, ModelConfig] = {
-    "claude-3-7-sonnet-20250219": SONNET_3_7,
-    "claude-opus-4@20250508": CLAUDE_4,
     "claude-sonnet-4-20250514": CLAUDE_4,
     "claude-opus-4-20250514": CLAUDE_4,
 }
 
 CONFIG_DIR = PosixPath("~/.anthropic").expanduser()
-API_KEY_FILE = CONFIG_DIR / "api_key"
-STREAMLIT_STYLE = """
-<style>
-    /* Highlight the stop button in red */
-    button[kind=header] {
-        background-color: rgb(255, 75, 75);
-        border: 1px solid rgb(255, 75, 75);
-        color: rgb(255, 255, 255);
-    }
-    button[kind=header]:hover {
-        background-color: rgb(255, 51, 51);
-    }
-     /* Hide the streamlit deploy button */
-    .stAppDeployButton {
-        visibility: hidden;
-    }
-</style>
-"""
 
-WARNING_TEXT = "⚠️ Security Alert: Never provide access to sensitive accounts or data, as malicious web content can hijack Claude's behavior"
 INTERRUPT_TEXT = "(user stopped or interrupted and wrote the following)"
 INTERRUPT_TOOL_ERROR = "human stopped or interrupted tool execution"
 
+IN_SAMPLING_LOOP = False
 
-class Sender(StrEnum):
+
+class Sender:
     USER = "user"
     BOT = "assistant"
     TOOL = "tool"
@@ -115,10 +76,24 @@ DB_FILE = os.path.join(tempfile.gettempdir(), "state.sqlite3")
 
 
 def setup_state():
+    st.session_state.messages = []
+    st.session_state.api_key = os.getenv("ANTHROPIC_API_KEY")
+    st.session_state.provider = APIProvider.ANTHROPIC
+    model_conf = CLAUDE_4
+    st.session_state.model = "claude-sonnet-4-20250514"
+    st.session_state.tool_version = model_conf.tool_version
+    st.session_state.output_tokens = model_conf.default_output_tokens
+    st.session_state.max_output_tokens = model_conf.max_output_tokens
+    st.session_state.responses = {}
+    st.session_state.tools = {}
+    st.session_state.custom_system_prompt = ""
+    st.session_state.token_efficient_tools_beta = False
+
+    # reset_db()
 
     with sqlite3.connect(DB_FILE) as connection:
         cursor = connection.cursor()
-        # create tables
+        # create tables if not exist
         with open("computer_use_demo/tables.sql", "r") as f:
             ddl = f.read()
             cursor.executescript(ddl)
@@ -127,148 +102,34 @@ def setup_state():
         cursor.execute("SELECT state FROM session_state WHERE id = 1")
         row = cursor.fetchone()
         if row:
-            session_state = pickle.loads(row[0])
-            logger.warning(f"Restored state: {session_state}")
-            for k, v in session_state.items():
-                st.session_state.__setattr__(k, v)
-
-    logger.warning(f"SESSION STATE: {pickle.dumps(st.session_state.to_dict())}")
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "api_key" not in st.session_state:
-        # Try to load API key from file first, then environment
-        st.session_state.api_key = load_from_storage("api_key") or os.getenv(
-            "ANTHROPIC_API_KEY", ""
-        )
-    if "provider" not in st.session_state:
-        st.session_state.provider = (
-            os.getenv("API_PROVIDER", "anthropic") or APIProvider.ANTHROPIC
-        )
-    if "provider_radio" not in st.session_state:
-        st.session_state.provider_radio = st.session_state.provider
-    if "model" not in st.session_state:
-        _reset_model()
-    if "auth_validated" not in st.session_state:
-        st.session_state.auth_validated = False
-    if "responses" not in st.session_state:
-        st.session_state.responses = {}
-    if "tools" not in st.session_state:
-        st.session_state.tools = {}
-    if "only_n_most_recent_images" not in st.session_state:
-        st.session_state.only_n_most_recent_images = 3
-    if "custom_system_prompt" not in st.session_state:
-        st.session_state.custom_system_prompt = load_from_storage("system_prompt") or ""
-    if "hide_images" not in st.session_state:
-        st.session_state.hide_images = False
-    if "token_efficient_tools_beta" not in st.session_state:
-        st.session_state.token_efficient_tools_beta = False
-    if "in_sampling_loop" not in st.session_state:
-        st.session_state.in_sampling_loop = False
+            for k, v in pickle.loads(row[0]).items():
+                st.session_state[k] = v
 
 
-def _reset_model():
-    st.session_state.model = PROVIDER_TO_DEFAULT_MODEL_NAME[
-        cast(APIProvider, st.session_state.provider)
-    ]
-    _reset_model_conf()
-
-
-def _reset_model_conf():
-    model_conf = (
-        MODEL_TO_MODEL_CONF.get(
-            st.session_state.model, SONNET_3_5_NEW
-        )  # Default fallback
-    )
-
-    # If we're in radio selection mode, use the selected tool version
-    if hasattr(st.session_state, "tool_versions"):
-        st.session_state.tool_version = st.session_state.tool_versions
-    else:
-        st.session_state.tool_version = model_conf.tool_version
-
-    st.session_state.has_thinking = model_conf.has_thinking
-    st.session_state.output_tokens = model_conf.default_output_tokens
-    st.session_state.max_output_tokens = model_conf.max_output_tokens
-    st.session_state.thinking_budget = int(model_conf.default_output_tokens / 2)
+def reset_db():
+    with sqlite3.connect(DB_FILE) as connection:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM session_state")
+        connection.commit()
 
 
 async def main():
     """Render loop for streamlit"""
     setup_state()
-
-    st.markdown(STREAMLIT_STYLE, unsafe_allow_html=True)
-
-    st.title("Claude Computer Use Demo")
-
-    if not os.getenv("HIDE_WARNING", False):
-        st.warning(WARNING_TEXT)
+    st.title("Claude Computer Use")
 
     with st.sidebar:
 
-        def _reset_api_provider():
-            if st.session_state.provider_radio != st.session_state.provider:
-                _reset_model()
-                st.session_state.provider = st.session_state.provider_radio
-                st.session_state.auth_validated = False
-
-        provider_options = [option.value for option in APIProvider]
-        st.radio(
-            "API Provider",
-            options=provider_options,
-            key="provider_radio",
-            format_func=lambda x: x.title(),
-            on_change=_reset_api_provider,
-        )
-
-        st.text_input("Model", key="model", on_change=_reset_model_conf)
-
-        if st.session_state.provider == APIProvider.ANTHROPIC:
-            st.text_input(
-                "Anthropic API Key",
-                type="password",
-                key="api_key",
-                on_change=lambda: save_to_storage("api_key", st.session_state.api_key),
-            )
-
-        st.number_input(
-            "Only send N most recent images",
-            min_value=0,
-            key="only_n_most_recent_images",
-            help="To decrease the total tokens sent, remove older screenshots from the conversation",
-        )
         st.text_area(
             "Custom System Prompt Suffix",
             key="custom_system_prompt",
-            help="Additional instructions to append to the system prompt. see computer_use_demo/loop.py for the base system prompt.",
-            on_change=lambda: save_to_storage(
-                "system_prompt", st.session_state.custom_system_prompt
-            ),
+            help="Additional instructions to append to the system prompt",
+            on_change=lambda: persist_state(),
         )
-        st.checkbox("Hide screenshots", key="hide_images")
         st.checkbox(
-            "Enable token-efficient tools beta", key="token_efficient_tools_beta"
-        )
-        versions = get_args(ToolVersion)
-        st.radio(
-            "Tool Versions",
-            key="tool_versions",
-            options=versions,
-            index=versions.index(st.session_state.tool_version),
-            on_change=lambda: setattr(
-                st.session_state, "tool_version", st.session_state.tool_versions
-            ),
-        )
-
-        st.number_input("Max Output Tokens", key="output_tokens", step=1)
-
-        st.checkbox("Thinking Enabled", key="thinking", value=False)
-        st.number_input(
-            "Thinking Budget",
-            key="thinking_budget",
-            max_value=st.session_state.max_output_tokens,
-            step=1,
-            disabled=not st.session_state.thinking,
+            "Enable token-efficient tools beta",
+            key="token_efficient_tools_beta",
+            on_change=lambda: persist_state(),
         )
 
         if st.button("Reset", type="primary"):
@@ -280,15 +141,6 @@ async def main():
                 subprocess.run("pkill Xvfb; pkill tint2", shell=True)  # noqa: ASYNC221
                 await asyncio.sleep(1)
                 subprocess.run("./start_all.sh", shell=True)  # noqa: ASYNC221
-
-    if not st.session_state.auth_validated:
-        if auth_error := validate_auth(
-            st.session_state.provider, st.session_state.api_key
-        ):
-            st.warning(f"Please resolve the following auth issue:\n\n{auth_error}")
-            return
-        else:
-            st.session_state.auth_validated = True
 
     chat, http_logs = st.tabs(["Chat", "HTTP Exchange Logs"])
     new_message = st.chat_input(
@@ -331,12 +183,7 @@ async def main():
             )
             _render_message(Sender.USER, new_message)
 
-        try:
-            most_recent_message = st.session_state["messages"][-1]
-        except IndexError:
-            return
-
-        if most_recent_message["role"] is not Sender.USER:
+        if not st.session_state.messages or st.session_state.messages[-1]["role"] != Sender.USER:
             # we don't have a user message to respond to, exit early
             return
 
@@ -357,11 +204,8 @@ async def main():
                     response_state=st.session_state.responses,
                 ),
                 api_key=st.session_state.api_key,
-                tool_version=st.session_state.tool_versions,
+                tool_version=st.session_state.tool_version,
                 max_tokens=st.session_state.output_tokens,
-                thinking_budget=st.session_state.thinking_budget
-                if st.session_state.thinking
-                else None,
                 token_efficient_tools_beta=st.session_state.token_efficient_tools_beta,
                 persist_state=persist_state
             )
@@ -377,7 +221,7 @@ def persist_state():
 
 
 def maybe_add_interruption_blocks():
-    if not st.session_state.in_sampling_loop:
+    if not IN_SAMPLING_LOOP:
         return []
     # If this function is called while we're in the sampling loop, we can assume that the previous sampling loop was interrupted
     # and we should annotate the conversation with additional context for the model and heal any incomplete tool use calls
@@ -402,32 +246,10 @@ def maybe_add_interruption_blocks():
 
 @contextmanager
 def track_sampling_loop():
-    st.session_state.in_sampling_loop = True
+    global IN_SAMPLING_LOOP
+    IN_SAMPLING_LOOP = True
     yield
-    st.session_state.in_sampling_loop = False
-
-
-def validate_auth(provider: APIProvider, api_key: str | None):
-    if provider == APIProvider.ANTHROPIC:
-        if not api_key:
-            return "Enter your Anthropic API key in the sidebar to continue."
-    if provider == APIProvider.BEDROCK:
-        import boto3
-
-        if not boto3.Session().get_credentials():
-            return "You must have AWS credentials set up to use the Bedrock API."
-    if provider == APIProvider.VERTEX:
-        import google.auth
-        from google.auth.exceptions import DefaultCredentialsError
-
-        if not os.environ.get("CLOUD_ML_REGION"):
-            return "Set the CLOUD_ML_REGION environment variable to use the Vertex API."
-        try:
-            google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-        except DefaultCredentialsError:
-            return "Your google cloud credentials are not set up correctly."
+    IN_SAMPLING_LOOP = False
 
 
 def load_from_storage(filename: str) -> str | None:
@@ -466,14 +288,10 @@ def _api_response_callback(
     Handle an API response by storing it to state and rendering it.
     """
     response_id = datetime.now().isoformat()
-    logger.warning(f"{datetime.now()} api_response_callback 2")
     response_state[response_id] = (request, response)
-    logger.warning(f"{datetime.now()} api_response_callback 3")
     if error:
         _render_error(error)
-    logger.warning(f"{datetime.now()} api_response_callback 4")
     _render_api_response(request, response, response_id, tab)
-    logger.warning(f"{datetime.now()} api_response_callback 5")
 
 
 def _tool_output_callback(
@@ -492,27 +310,20 @@ def _render_api_response(
 ):
     """Render an API response to a streamlit tab"""
     with tab:
-        logger.warning(f"{datetime.now()} with tab 1")
         with st.expander(f"Request/Response ({response_id})"):
-            logger.warning(f"{datetime.now()} with expander 1")
             newline = "\n\n"
             st.markdown(
                 f"`{request.method} {request.url}`{newline}{newline.join(f'`{k}: {v}`' for k, v in request.headers.items())}"
             )
-            logger.warning(f"{datetime.now()} with expander 2")
             st.json(request.read().decode())
-            logger.warning(f"{datetime.now()} with expander 3")
             st.markdown("---")
             if isinstance(response, httpx.Response):
                 st.markdown(
                     f"`{response.status_code}`{newline}{newline.join(f'`{k}: {v}`' for k, v in response.headers.items())}"
                 )
-                logger.warning(f"{datetime.now()} with expander 4")
                 st.json(response.text)
             else:
                 st.write(response)
-            logger.warning(f"{datetime.now()} with expander 5")
-    logger.warning(f"{datetime.now()} with expander 6")
 
 
 def _render_error(error: Exception):
@@ -526,24 +337,16 @@ def _render_error(error: Exception):
         body += "\n\n**Traceback:**"
         lines = "\n".join(traceback.format_exception(error))
         body += f"\n\n```{lines}```"
-    save_to_storage(f"error_{datetime.now().timestamp()}.md", body)
     st.error(f"**{error.__class__.__name__}**\n\n{body}", icon=":material/error:")
 
 
 def _render_message(
-    sender: Sender,
+    sender: str,
     message: str | BetaContentBlockParam | ToolResult,
 ):
     """Convert input from the user or output from the agent to a streamlit message."""
     # streamlit's hotreloading breaks isinstance checks, so we need to check for class names
     is_tool_result = not isinstance(message, str | dict)
-    if not message or (
-        is_tool_result
-        and st.session_state.hide_images
-        and not hasattr(message, "error")
-        and not hasattr(message, "output")
-    ):
-        return
     with st.chat_message(sender):
         if is_tool_result:
             message = cast(ToolResult, message)
@@ -554,14 +357,11 @@ def _render_message(
                     st.markdown(message.output)
             if message.error:
                 st.error(message.error)
-            if message.base64_image and not st.session_state.hide_images:
+            if message.base64_image:
                 st.image(base64.b64decode(message.base64_image))
         elif isinstance(message, dict):
             if message["type"] == "text":
                 st.write(message["text"])
-            elif message["type"] == "thinking":
-                thinking_content = message.get("thinking", "")
-                st.markdown(f"[Thinking]\n\n{thinking_content}")
             elif message["type"] == "tool_use":
                 st.code(f'Tool Use: {message["name"]}\nInput: {message["input"]}')
             else:
