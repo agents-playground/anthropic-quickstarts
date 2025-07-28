@@ -39,7 +39,6 @@ async def test_loop():
         messages: list[BetaMessageParam] = [{"role": "user", "content": "Test message"}]
         result = await sampling_loop(
             model="test-model",
-            provider=APIProvider.ANTHROPIC,
             system_prompt_suffix="",
             messages=messages,
             output_callback=output_callback,

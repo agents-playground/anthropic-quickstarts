@@ -342,7 +342,6 @@ async def main():
             st.session_state.messages = await sampling_loop(
                 system_prompt_suffix=st.session_state.custom_system_prompt,
                 model=st.session_state.model,
-                provider=st.session_state.provider,
                 messages=st.session_state.messages,
                 output_callback=partial(_render_message, Sender.BOT),
                 tool_output_callback=partial(
@@ -354,7 +353,6 @@ async def main():
                     response_state=st.session_state.responses,
                 ),
                 api_key=st.session_state.api_key,
-                only_n_most_recent_images=st.session_state.only_n_most_recent_images,
                 tool_version=st.session_state.tool_versions,
                 max_tokens=st.session_state.output_tokens,
                 thinking_budget=st.session_state.thinking_budget
@@ -470,7 +468,7 @@ def _api_response_callback(
     if error:
         _render_error(error)
     logger.warning(f"{datetime.now()} api_response_callback 4")
-    # _render_api_response(request, response, response_id, tab)
+    _render_api_response(request, response, response_id, tab)
     logger.warning(f"{datetime.now()} api_response_callback 5")
 
 

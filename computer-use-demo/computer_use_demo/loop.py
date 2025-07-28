@@ -73,7 +73,6 @@ SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 async def sampling_loop(
     *,
     model: str,
-    provider: APIProvider,
     system_prompt_suffix: str,
     messages: list[BetaMessageParam],
     output_callback: Callable[[BetaContentBlockParam], None],
@@ -82,7 +81,6 @@ async def sampling_loop(
         [httpx.Request, httpx.Response | object | None, Exception | None], None
     ],
     api_key: str,
-    only_n_most_recent_images: int | None = None,
     max_tokens: int = 4096,
     tool_version: ToolVersion,
     thinking_budget: int | None = None,
@@ -101,34 +99,14 @@ async def sampling_loop(
 
     while True:
         logger.warning(f"{datetime.now()} loop.py iteration ...")
-        enable_prompt_caching = False
         betas = [tool_group.beta_flag] if tool_group.beta_flag else []
         if token_efficient_tools_beta:
             betas.append("token-efficient-tools-2025-02-19")
-        image_truncation_threshold = only_n_most_recent_images or 0
-        if provider == APIProvider.ANTHROPIC:
-            client = Anthropic(api_key=api_key, max_retries=50)
-            enable_prompt_caching = True
-        elif provider == APIProvider.VERTEX:
-            client = AnthropicVertex()
-        elif provider == APIProvider.BEDROCK:
-            client = AnthropicBedrock()
 
-        if enable_prompt_caching:
-            betas.append(PROMPT_CACHING_BETA_FLAG)
-            _inject_prompt_caching(messages)
-            # Because cached reads are 10% of the price, we don't think it's
-            # ever sensible to break the cache by truncating images
-            only_n_most_recent_images = 0
-            # Use type ignore to bypass TypedDict check until SDK types are updated
-            system["cache_control"] = {"type": "ephemeral"}  # type: ignore
+        client = Anthropic(api_key=api_key, max_retries=50)
+        betas.append(PROMPT_CACHING_BETA_FLAG)
+        system["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
-        if only_n_most_recent_images:
-            _maybe_filter_to_n_most_recent_images(
-                messages,
-                only_n_most_recent_images,
-                min_removal_threshold=image_truncation_threshold,
-            )
         extra_body = {}
         if thinking_budget:
             # Ensure we only send the required fields for thinking
@@ -142,6 +120,8 @@ async def sampling_loop(
         # `response = client.messages.create(...)` instead.
         try:
             logger.warning(f"{datetime.now()} Sending request to {model} ...")
+            messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+
             raw_response = client.beta.messages.with_raw_response.create(
                 max_tokens=max_tokens,
                 messages=messages,
@@ -151,6 +131,8 @@ async def sampling_loop(
                 betas=betas,
                 extra_body=extra_body,
             )
+
+            del messages[-1]["content"][-1]["cache_control"]
             logger.warning(f"{datetime.now()} Received {model} response.")
         except (APIStatusError, APIResponseValidationError) as e:
             api_response_callback(e.request, e.response, e)
@@ -163,21 +145,13 @@ async def sampling_loop(
             logger.warning(f"{datetime.now()} Exception raised.", e)
             return messages
 
-        logger.warning(f"{datetime.now()} Started api_response_callback 1 ...")
         api_response_callback(
             raw_response.http_response.request, raw_response.http_response, None
         )
-        logger.warning(f"{datetime.now()} Done api_response_callback 1.")
 
-        logger.warning(f"{datetime.now()} Started parsing ...")
         response = raw_response.parse()
-        logger.warning(f"{datetime.now()} Done parsing.")
-
-        logger.warning(f"{datetime.now()} Response to params started ...")
         response_params = _response_to_params(response)
-        logger.warning(f"{datetime.now()} Response to params done.")
         messages.append({"role": "assistant", "content": response_params})
-        logger.warning(f"{datetime.now()} messages.append() done.")
 
         tool_result_content: list[BetaToolResultBlockParam] = []
         for content_block in response_params:
@@ -191,12 +165,8 @@ async def sampling_loop(
                     tool_input=tool_input,
                 )
                 logger.warning(f"{datetime.now()} {tool_name} tool done.")
-                tool_result_content.append(
-                    _make_api_tool_result(result, content_block["id"])
-                )
-                logger.warning(f"{datetime.now()} {tool_name} tool content appended.")
+                tool_result_content.append(_make_api_tool_result(result, content_block["id"]))
                 tool_output_callback(result, content_block["id"])
-                logger.warning(f"{datetime.now()} {tool_name} tool callback done.")
 
         if not tool_result_content:
             output_callback("No tool use requested. Prev response is final. Execution terminated.")
@@ -205,55 +175,6 @@ async def sampling_loop(
 
         messages.append({"content": tool_result_content, "role": "user"})
         persist_state()
-
-
-def _maybe_filter_to_n_most_recent_images(
-    messages: list[BetaMessageParam],
-    images_to_keep: int,
-    min_removal_threshold: int,
-):
-    """
-    With the assumption that images are screenshots that are of diminishing value as
-    the conversation progresses, remove all but the final `images_to_keep` tool_result
-    images in place, with a chunk of min_removal_threshold to reduce the amount we
-    break the implicit prompt cache.
-    """
-    if images_to_keep is None:
-        return messages
-
-    tool_result_blocks = cast(
-        list[BetaToolResultBlockParam],
-        [
-            item
-            for message in messages
-            for item in (
-                message["content"] if isinstance(message["content"], list) else []
-            )
-            if isinstance(item, dict) and item.get("type") == "tool_result"
-        ],
-    )
-
-    total_images = sum(
-        1
-        for tool_result in tool_result_blocks
-        for content in tool_result.get("content", [])
-        if isinstance(content, dict) and content.get("type") == "image"
-    )
-
-    images_to_remove = total_images - images_to_keep
-    # for better cache behavior, we want to remove in chunks
-    images_to_remove -= images_to_remove % min_removal_threshold
-
-    for tool_result in tool_result_blocks:
-        if isinstance(tool_result.get("content"), list):
-            new_content = []
-            for content in tool_result.get("content", []):
-                if isinstance(content, dict) and content.get("type") == "image":
-                    if images_to_remove > 0:
-                        images_to_remove -= 1
-                        continue
-                new_content.append(content)
-            tool_result["content"] = new_content
 
 
 def _response_to_params(
@@ -277,31 +198,6 @@ def _response_to_params(
             # Handle tool use blocks normally
             res.append(cast(BetaToolUseBlockParam, block.model_dump()))
     return res
-
-
-def _inject_prompt_caching(
-    messages: list[BetaMessageParam],
-):
-    """
-    Set cache breakpoints for the 3 most recent turns
-    one cache breakpoint is left for tools/system prompt, to be shared across sessions
-    """
-
-    breakpoints_remaining = 3
-    for message in reversed(messages):
-        if message["role"] == "user" and isinstance(
-            content := message["content"], list
-        ):
-            if breakpoints_remaining:
-                breakpoints_remaining -= 1
-                # Use type ignore to bypass TypedDict check until SDK types are updated
-                content[-1]["cache_control"] = BetaCacheControlEphemeralParam(  # type: ignore
-                    {"type": "ephemeral"}
-                )
-            else:
-                content[-1].pop("cache_control", None)
-                # we'll only every have one extra turn per loop
-                break
 
 
 def _make_api_tool_result(
