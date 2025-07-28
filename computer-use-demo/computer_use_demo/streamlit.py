@@ -123,12 +123,12 @@ async def main():
                 reset_db()
                 setup_state()
 
-    chat, http_logs = st.tabs(["Chat", "HTTP Exchange Logs"])
+    chat_tab, requests_tab = st.tabs(["Chat", "HTTP Exchange Logs"])
     new_message = st.chat_input("Type a message to Claude...")
 
-    with chat:
+    with chat_tab:
         # render past chats
-        for message in st.session_state.messages:
+        for message in st.session_state.messages[-10:]:
             if isinstance(message["content"], str):
                 _render_message(message["role"], message["content"])
             elif isinstance(message["content"], list):
@@ -146,8 +146,8 @@ async def main():
                         )
 
         # render past http exchanges
-        for identity, (request, response) in st.session_state.responses.items():
-            _render_api_response(request, response, identity, http_logs)
+        for identity, (request, response) in list(st.session_state.responses.items())[-3:]:
+            _render_api_response(request, response, identity, requests_tab)
 
         # render past chats
         if new_message:
@@ -180,7 +180,7 @@ async def main():
                 ),
                 api_response_callback=partial(
                     _api_response_callback,
-                    tab=http_logs,
+                    tab=requests_tab,
                     response_state=st.session_state.responses,
                 ),
                 api_key=st.session_state.api_key,
