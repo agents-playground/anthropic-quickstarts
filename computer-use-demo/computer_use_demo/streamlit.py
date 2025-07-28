@@ -9,6 +9,7 @@ import os
 import pickle
 import sqlite3
 import subprocess
+import tempfile
 import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -110,9 +111,12 @@ class Sender(StrEnum):
     TOOL = "tool"
 
 
+DB_FILE = os.path.join(tempfile.gettempdir(), "state.sqlite3")
+
+
 def setup_state():
 
-    with sqlite3.connect("computer_use_demo/state.db") as connection:
+    with sqlite3.connect(DB_FILE) as connection:
         cursor = connection.cursor()
         # create tables
         with open("computer_use_demo/tables.sql", "r") as f:
@@ -366,7 +370,7 @@ async def main():
 
 def persist_state():
     pickled_state = pickle.dumps(st.session_state.to_dict())
-    with sqlite3.connect("computer_use_demo/state.db") as connection:
+    with sqlite3.connect(DB_FILE) as connection:
         cursor = connection.cursor()
         cursor.execute("INSERT INTO session_state (id, state) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET state = ?, timestamp = CURRENT_TIMESTAMP", (pickled_state, pickled_state))
         connection.commit()
