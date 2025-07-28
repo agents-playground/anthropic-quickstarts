@@ -11,14 +11,11 @@ from typing import Any, cast
 import httpx
 from anthropic import (
     Anthropic,
-    AnthropicBedrock,
-    AnthropicVertex,
     APIError,
     APIResponseValidationError,
     APIStatusError,
 )
 from anthropic.types.beta import (
-    BetaCacheControlEphemeralParam,
     BetaContentBlockParam,
     BetaImageBlockParam,
     BetaMessage,
@@ -30,11 +27,10 @@ from anthropic.types.beta import (
 )
 
 from .tools import (
-    TOOL_GROUPS_BY_VERSION,
     ToolCollection,
     ToolResult,
-    ToolVersion,
 )
+from .tools.groups import ToolGroup, COMPUTER_USE_20250429
 
 PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31"
 
@@ -82,14 +78,13 @@ async def sampling_loop(
     ],
     api_key: str,
     max_tokens: int = 4096,
-    tool_version: ToolVersion,
     token_efficient_tools_beta: bool = False,
     persist_state: Callable = None
 ):
     """
     Agentic sampling loop for the assistant/tool interaction of computer use.
     """
-    tool_group = TOOL_GROUPS_BY_VERSION[tool_version]
+    tool_group = COMPUTER_USE_20250429
     tool_collection = ToolCollection(*(ToolCls() for ToolCls in tool_group.tools))
     system = BetaTextBlockParam(
         type="text",

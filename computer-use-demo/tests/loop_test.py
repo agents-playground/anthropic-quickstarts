@@ -44,8 +44,7 @@ async def test_loop():
             output_callback=output_callback,
             tool_output_callback=tool_output_callback,
             api_response_callback=api_response_callback,
-            api_key="test-key",
-            tool_version="computer_use_20250124",
+            api_key="test-key"
         )
 
         assert len(result) == 4

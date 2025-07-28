@@ -8,16 +8,13 @@ import logging
 import os
 import pickle
 import sqlite3
-import subprocess
 import tempfile
 import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import StrEnum
 from functools import partial
-from pathlib import PosixPath
-from typing import cast, get_args
+from typing import cast
 
 import httpx
 import streamlit as st
@@ -33,7 +30,8 @@ from computer_use_demo.loop import (
     APIProvider,
     sampling_loop,
 )
-from computer_use_demo.tools import ToolResult, ToolVersion
+from computer_use_demo.tools import ToolResult
+from computer_use_demo.tools.groups import COMPUTER_USE_20250429
 
 logger = logging.Logger("streamlit.py")
 logging.basicConfig(level=logging.INFO)
@@ -41,24 +39,15 @@ logging.basicConfig(level=logging.INFO)
 
 @dataclass(kw_only=True, frozen=True)
 class ModelConfig:
-    tool_version: ToolVersion
     max_output_tokens: int
     default_output_tokens: int
     has_thinking: bool = False
 
 CLAUDE_4 = ModelConfig(
-    tool_version="computer_use_20250124",
     max_output_tokens=128_000,
     default_output_tokens=1024 * 16,
     has_thinking=True,
 )
-
-MODEL_TO_MODEL_CONF: dict[str, ModelConfig] = {
-    "claude-sonnet-4-20250514": CLAUDE_4,
-    "claude-opus-4-20250514": CLAUDE_4,
-}
-
-CONFIG_DIR = PosixPath("~/.anthropic").expanduser()
 
 INTERRUPT_TEXT = "(user stopped or interrupted and wrote the following)"
 INTERRUPT_TOOL_ERROR = "human stopped or interrupted tool execution"
@@ -74,6 +63,7 @@ class Sender:
 
 DB_FILE = os.path.join(tempfile.gettempdir(), "state.sqlite3")
 
+MAX_HISTORY_SIZE = 3
 
 def setup_state():
     st.session_state.messages = []
@@ -81,7 +71,6 @@ def setup_state():
     st.session_state.provider = APIProvider.ANTHROPIC
     model_conf = CLAUDE_4
     st.session_state.model = "claude-sonnet-4-20250514"
-    st.session_state.tool_version = model_conf.tool_version
     st.session_state.output_tokens = model_conf.default_output_tokens
     st.session_state.max_output_tokens = model_conf.max_output_tokens
     st.session_state.responses = {}
@@ -117,7 +106,6 @@ async def main():
     st.title("Claude Computer Use")
 
     with st.sidebar:
-
         st.text_area(
             "Custom System Prompt Suffix",
             key="custom_system_prompt",
@@ -129,18 +117,14 @@ async def main():
             key="token_efficient_tools_beta",
             on_change=lambda: persist_state(),
         )
-
-        if st.button("Reset", type="primary"):
+        if st.button("Reset conversation history", type="primary"):
             with st.spinner("Resetting..."):
                 st.session_state.clear()
-                persist_state()
                 reset_db()
                 setup_state()
 
     chat, http_logs = st.tabs(["Chat", "HTTP Exchange Logs"])
-    new_message = st.chat_input(
-        "Type a message to send to Claude to control the computer..."
-    )
+    new_message = st.chat_input("Type a message to Claude...")
 
     with chat:
         # render past chats
@@ -177,6 +161,7 @@ async def main():
                 }
             )
             _render_message(Sender.USER, new_message)
+            slice_chat_history()
 
         if not st.session_state.messages or st.session_state.messages[-1]["role"] != Sender.USER:
             # we don't have a user message to respond to, exit early
@@ -199,7 +184,6 @@ async def main():
                     response_state=st.session_state.responses,
                 ),
                 api_key=st.session_state.api_key,
-                tool_version=st.session_state.tool_version,
                 max_tokens=st.session_state.output_tokens,
                 token_efficient_tools_beta=st.session_state.token_efficient_tools_beta,
                 persist_state=persist_state
@@ -247,31 +231,6 @@ def track_sampling_loop():
     IN_SAMPLING_LOOP = False
 
 
-def load_from_storage(filename: str) -> str | None:
-    """Load data from a file in the storage directory."""
-    try:
-        file_path = CONFIG_DIR / filename
-        if file_path.exists():
-            data = file_path.read_text().strip()
-            if data:
-                return data
-    except Exception as e:
-        st.write(f"Debug: Error loading {filename}: {e}")
-    return None
-
-
-def save_to_storage(filename: str, data: str) -> None:
-    """Save data to a file in the storage directory."""
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        file_path = CONFIG_DIR / filename
-        file_path.write_text(data)
-        # Ensure only user can read/write the file
-        file_path.chmod(0o600)
-    except Exception as e:
-        st.write(f"Debug: Error saving {filename}: {e}")
-
-
 def _api_response_callback(
     request: httpx.Request,
     response: httpx.Response | object | None,
@@ -282,6 +241,7 @@ def _api_response_callback(
     """
     Handle an API response by storing it to state and rendering it.
     """
+    slice_chat_history()
     response_id = datetime.now().isoformat()
     response_state[response_id] = (request, response)
     if error:
@@ -340,7 +300,7 @@ def _render_message(
     message: str | BetaContentBlockParam | ToolResult,
 ):
     """Convert input from the user or output from the agent to a streamlit message."""
-    # streamlit's hotreloading breaks isinstance checks, so we need to check for class names
+    # streamlit's hot reloading breaks isinstance checks, so we need to check for class names
     is_tool_result = not isinstance(message, str | dict)
     with st.chat_message(sender):
         if is_tool_result:
@@ -364,6 +324,12 @@ def _render_message(
                 raise Exception(f'Unexpected response type {message["type"]}')
         else:
             st.markdown(message)
+
+
+def slice_chat_history():
+    pass
+    # if len(st.session_state.messages) > MAX_HISTORY_SIZE:
+    #     st.session_state.messages = st.session_state.messages[-MAX_HISTORY_SIZE:]
 
 
 if __name__ == "__main__":
