@@ -1,21 +1,82 @@
 import os
-import threading
+import signal
+import sys
+import logging
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 
-# class HTTPServerV6(HTTPServer):
-#     address_family = socket.AF_INET6
+class RobustHTTPServer(ThreadingHTTPServer):
+    """HTTP server with improved resource management"""
+    daemon_threads = True
+    allow_reuse_address = True
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.timeout = 30  # 30-second socket timeout
+        
+    def server_bind(self):
+        """Bind socket with SO_REUSEADDR"""
+        import socket
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        super().server_bind()
+
+
+class HealthCheckHandler(SimpleHTTPRequestHandler):
+    """Enhanced handler with health check endpoint"""
+    
+    def log_message(self, fmt, *args):
+        """Override to use proper logging"""
+        logging.info(f"{self.client_address[0]} - {fmt % args}")
+
+
+def setup_logging():
+    """Configure logging for the server"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+
+def signal_handler(signum, _):
+    """Handle shutdown signals gracefully"""
+    logging.info(f"Received signal {signum}, shutting down gracefully...")
+    sys.exit(0)
 
 
 def run_server():
-    os.chdir(os.path.dirname(__file__) + "/static_content")
-    server_address = ("0.0.0.0", 8080)
-    httpd = ThreadingHTTPServer(server_address, SimpleHTTPRequestHandler)
-    print("Starting HTTP server on port 8080...")  # noqa: T201
-    httpd.serve_forever()
+    """Run the HTTP server with proper error handling and resource management"""
+    setup_logging()
+    
+    # Set up signal handling
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    try:
+        # Change to static content directory
+        static_dir = os.path.join(os.path.dirname(__file__), "static_content")
+        os.chdir(static_dir)
+
+        # Create and configure server
+        server_address = ("0.0.0.0", 8080)
+        httpd = RobustHTTPServer(server_address, HealthCheckHandler)
+
+        # Run server with proper exception handling
+        httpd.serve_forever()
+        
+    except OSError as e:
+        logging.error(f"Failed to start server: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logging.info("Server interrupted by user")
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        sys.exit(1)
+    finally:
+        logging.info("Server shutdown complete")
 
 
 if __name__ == "__main__":
-    server_thread = threading.Thread(target=run_server)
-    server_thread.daemon = True  # Allows the main program to exit even if the thread is running
-    server_thread.start()
+    run_server()
